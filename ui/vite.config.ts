@@ -5,6 +5,10 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [svelte()],
 
+  // Tauri menyajikan file dari custom protocol (tauri://localhost atau https://tauri.localhost).
+  // Path asset HARUS relatif (./assets/...) agar ter-resolve ke folder dist yang di-bundle.
+  base: './',
+
   // Vite options tailored for Tauri development
   //
   // 1. prevent Vite from obscuring Rust errors

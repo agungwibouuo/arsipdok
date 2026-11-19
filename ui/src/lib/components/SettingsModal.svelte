@@ -16,8 +16,10 @@
 
   let tab = $state<Tab>('umum');
 
-  // Draft lokal — hanya dikomit ke store saat "Simpan" ditekan
-  let draft = $state<Settings>(structuredClone(store.settings));
+  // Draft lokal — hanya dikomit ke store saat "Simpan" ditekan.
+  // $state.snapshot() diperlukan: store.settings adalah proxy reaktif Svelte
+  // yang TIDAK bisa di-structuredClone (DataCloneError).
+  let draft = $state<Settings>($state.snapshot(store.settings));
 
   const DEFAULT_PHOTO_EXTS = [
     'jpg', 'jpeg', 'png', 'heic', 'heif', 'webp', 'tif', 'tiff', 'cr2', 'cr3', 'nef', 'arw', 'dng',
@@ -39,7 +41,7 @@
   let wasOpen = false;
   $effect(() => {
     if (open && !wasOpen) {
-      draft = structuredClone(store.settings);
+      draft = $state.snapshot(store.settings);
       tab = 'umum';
     }
     wasOpen = open;

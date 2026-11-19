@@ -10,6 +10,13 @@ import type {
   DiskSpaceInfo,
 } from './types';
 
+// Proxy $state Svelte TIDAK bisa di-structuredClone oleh IPC Tauri
+// (DataCloneError). Kita serialisasi dulu ke JSON lalu parse kembali
+// untuk mendapatkan objek polos (plain object) yang bisa di-clone.
+function plain<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 export const api = {
   getVersion(): Promise<string> {
     return invoke<string>('get_version');
@@ -20,15 +27,15 @@ export const api = {
   },
 
   saveSettings(s: Settings): Promise<void> {
-    return invoke<void>('save_settings', { s });
+    return invoke<void>('save_settings', { s: plain(s) });
   },
 
   scanSources(sources: string[]): Promise<ScanReport> {
-    return invoke<ScanReport>('scan_sources', { sources });
+    return invoke<ScanReport>('scan_sources', { sources: plain(sources) });
   },
 
   extractMetadata(files: ScannedFile[]): Promise<Record<string, DateMetadata>> {
-    return invoke<Record<string, DateMetadata>>('extract_metadata', { files });
+    return invoke<Record<string, DateMetadata>>('extract_metadata', { files: plain(files) });
   },
 
   buildPlan(
@@ -36,7 +43,11 @@ export const api = {
     dates: Record<string, DateMetadata>,
     destinations: Settings['destinations'],
   ): Promise<TransferPlan> {
-    return invoke<TransferPlan>('build_plan', { files, dates, destinations });
+    return invoke<TransferPlan>('build_plan', {
+      files: plain(files),
+      dates: plain(dates),
+      destinations: plain(destinations),
+    });
   },
 
   startTransfer(
@@ -45,9 +56,9 @@ export const api = {
     sourceRoots: string[] = [],
   ): Promise<TransferReport> {
     return invoke<TransferReport>('start_transfer', {
-      plan,
-      mode,
-      sourceRoots,
+      plan: plain(plan),
+      mode: plain(mode),
+      sourceRoots: plain(sourceRoots),
     });
   },
 
