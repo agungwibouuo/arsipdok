@@ -9,7 +9,7 @@
 | Tanggal | 19 November 2026 |
 | Platform | Windows 10/11 x64 |
 | Teknologi | Tauri 2 + Rust (frontend web) |
-| Status | Disetujui (Desain UI Selesai di FigCraft) |
+| Status | Implementasi — Fase 0.5 Selesai (Scaffold Tauri 2 & Core Modules) |
 
 ---
 
@@ -695,7 +695,7 @@ Frontend (UI)  ──invoke(command)──▶  Rust core
 | Fase | Isi | Keluaran |
 |---|---|---|
 | **Fase 0** ✅ | Desain UI lengkap di FigCraft (7 state utama + 4 tab Pengaturan + modal konfirmasi + tooltip tanggal + logo/ikon) | `design/ArsipDok.figcraft` |
-| **Fase 0.5** | Setup project Tauri 2, struktur modul, settings | Kerangka aplikasi berjalan |
+| **Fase 0.5** ✅ | Setup project Tauri 2 + Svelte 5, struktur modul Rust (scanner, metadata, planner, transfer, verifier, logger, settings, paths, error, commands), 19 unit test lulus | Kerangka aplikasi berjalan |
 | **Fase 1 (MVP)** | Scan, metadata, grouping, preview, multi-tujuan, copy/move, verifikasi, log | Exe fungsional v1.0 |
 | **Fase 2** | EXIF HEIC/CR3, opsi pertahankan subfolder, auto-eject, preset kegiatan | v1.1 |
 | **Fase 3** | Deteksi duplikat lintas arsip, profil tujuan tersimpan, persist antrean | v1.2 |
