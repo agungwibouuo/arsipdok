@@ -52,7 +52,8 @@ impl Default for TransferConfig {
     }
 }
 
-/// Eksekusi transfer satu item
+/// Eksekusi transfer satu item (TANPA menghapus sumber — penghapusan sumber
+/// dilakukan di level pemanggil setelah semua tujuan berhasil).
 pub fn execute_item(item: &PlanItem, cfg: &TransferConfig, cancel: &Arc<AtomicBool>) -> TransferResult {
     let start = std::time::Instant::now();
 
@@ -125,13 +126,8 @@ pub fn execute_item(item: &PlanItem, cfg: &TransferConfig, cancel: &Arc<AtomicBo
         return fail(item, start, format!("Verifikasi gagal: {e}"));
     }
 
-    // Move: hapus sumber
-    if cfg.mode == TransferMode::Move {
-        if let Err(e) = std::fs::remove_file(&item.source) {
-            return fail(item, start, format!("Hapus sumber gagal: {e}"));
-        }
-    }
-
+    // CATATAN: sumber TIDAK dihapus di sini. Mode Move menghapus sumber
+    // hanya jika semua tujuan untuk file ini sudah sukses (lihat `delete_source`).
     TransferResult {
         item: item.clone(),
         status: ItemStatus::Done,
@@ -139,6 +135,42 @@ pub fn execute_item(item: &PlanItem, cfg: &TransferConfig, cancel: &Arc<AtomicBo
         error: None,
         final_path: Some(final_path),
     }
+}
+
+/// Hapus sumber setelah semua tujuan sukses (khusus mode Move).
+pub fn delete_source(path: &Path) -> Result<()> {
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+/// Hapus folder kosong di bawah root (dari dalam ke luar, root itu sendiri tidak dihapus).
+pub fn remove_empty_dirs(root: &Path) -> Result<usize> {
+    if !root.exists() {
+        return Ok(0);
+    }
+
+    // Kumpulkan direktori, urutkan paling dalam dulu
+    let mut dirs: Vec<PathBuf> = walkdir::WalkDir::new(root)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_dir())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    dirs.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
+
+    let mut removed = 0usize;
+    for d in dirs {
+        // Hanya hapus jika benar-benar kosong
+        let is_empty = std::fs::read_dir(&d)
+            .map(|mut it| it.next().is_none())
+            .unwrap_or(false);
+        if is_empty && std::fs::remove_dir(&d).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
 }
 
 fn fail(item: &PlanItem, start: std::time::Instant, err: String) -> TransferResult {

@@ -9,7 +9,7 @@ use exif as kamadak_exif;
 
 /// Asal tanggal yang diperoleh
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum MetadataSource {
     Exif,
     Video,

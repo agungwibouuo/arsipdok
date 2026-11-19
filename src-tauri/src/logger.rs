@@ -58,6 +58,22 @@ impl SessionLog {
         });
     }
 
+    /// Catat kegagalan non-item (mis. hapus sumber gagal)
+    pub fn push_error(&mut self, source: &std::path::Path, mode: &str, error: &str) {
+        self.entries.push(LogEntry {
+            timestamp: chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string(),
+            mode: mode.to_string(),
+            source_path: source.to_string_lossy().to_string(),
+            dest_root: String::new(),
+            dest_path: String::new(),
+            size_bytes: 0,
+            status: "error".to_string(),
+            metadata_source: "unknown".to_string(),
+            duration_ms: 0,
+            error: Some(error.to_string()),
+        });
+    }
+
     /// Simpan ke CSV
     pub fn save(&self) -> Result<()> {
         if let Some(parent) = self.file_path.parent() {

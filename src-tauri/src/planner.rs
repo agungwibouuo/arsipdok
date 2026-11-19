@@ -21,6 +21,8 @@ pub struct PlanItem {
     pub date: String,
     pub month: u32,
     pub day: u32,
+    #[serde(default)]
+    pub metadata_source: Option<String>,
 }
 
 /// Rencana transfer lengkap
@@ -59,6 +61,7 @@ pub fn build_plan(files: &[ScannedFile], dates: &BTreeMap<PathBuf, DateMetadata>
                 date: meta.date.format("%Y-%m-%d").to_string(),
                 month: meta.month,
                 day: meta.day,
+                metadata_source: Some(format!("{:?}", meta.source).to_lowercase()),
             });
         }
     }
