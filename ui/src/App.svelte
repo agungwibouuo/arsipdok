@@ -355,7 +355,12 @@
         </div>
 
         <div class="col-right">
-          {#if store.appState === 'siap' || store.appState === 'konfirmasi'}
+          {#if store.appState === 'memindai'}
+            <div class="loading-state">
+              <div class="spinner" aria-hidden="true"></div>
+              <p>Memindai folder sumber...</p>
+            </div>
+          {:else if store.appState === 'siap' || store.appState === 'konfirmasi'}
             <PreviewTable />
           {:else if store.appState === 'memindahkan'}
             <TransferProgress onCancel={onCancelTransfer} />
@@ -462,6 +467,31 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  .loading-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: var(--text-2);
+  }
+
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .toast-container {
