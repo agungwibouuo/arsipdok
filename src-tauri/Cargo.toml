@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "ArsipDok — sortir & transfer dokumentasi foto/video"
 authors = ["ArsipDok"]
 license = "MIT"
-repository = "https://github.com/local/arsipdok"
+repository = "https://github.com/agungwibouuo/arsipdok"
 edition = "2021"
 rust-version = "1.90"
 
