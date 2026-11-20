@@ -63,6 +63,19 @@ Tanggal diambil dari **metadata file** (EXIF/XMP untuk foto, creation time untuk
 
 Tersedia mode **Copy** (aman) atau **Move** (sumber dihapus setelah verifikasi).
 
+> 📘 Panduan lengkap: **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** — instalasi, konfigurasi, override tanggal, log audit, tips & trik.
+
+## 📚 Dokumentasi
+
+| Dokumen | Isi |
+|---|---|
+| **[📘 User Guide](docs/USER_GUIDE.md)** | Panduan pengguna: instalasi, alur kerja, preview, transfer, verifikasi, log |
+| **[🛠️ Developer Guide](docs/DEVELOPER.md)** | Setup dev environment, struktur kode, modul, testing, build & release |
+| **[🔌 API Reference](docs/API.md)** | Spesifikasi 12 command IPC + 2 event real-time, tipe data shared schema |
+| **[🏗️ Architecture](docs/ARCHITECTURE.md)** | Diagram sistem, alur pipeline, metadata flow, transfer logic, ADR |
+| **[🔧 Troubleshooting](docs/TROUBLESHOOTING.md)** | Masalah umum, solusi, error reference, debug tips, FAQ |
+| **[📜 Changelog](CHANGELOG.md)** | Riwayat rilis, fitur baru, known issues |
+
 ## 🛠️ Tech Stack
 
 | Lapisan | Teknologi |
@@ -96,10 +109,18 @@ pnpm tauri:build
 pnpm test:rust
 ```
 
+> 🛠️ Panduan developer lengkap: **[docs/DEVELOPER.md](docs/DEVELOPER.md)**
+
 ### Struktur Proyek
 
 ```text
 ├── design/               # File design FigCraft + preview
+├── docs/                 # Dokumentasi lengkap
+│   ├── USER_GUIDE.md     # Panduan pengguna
+│   ├── DEVELOPER.md      # Panduan pengembangan
+│   ├── API.md            # Referensi IPC
+│   ├── ARCHITECTURE.md   # Arsitektur sistem
+│   └── TROUBLESHOOTING.md # Masalah & solusi
 ├── src-tauri/            # Backend Rust (Tauri 2)
 │   ├── src/
 │   │   ├── scanner.rs    # Pemindaian folder sumber
