@@ -29,6 +29,51 @@
   color-scheme: light;
 }
 
+/* ── Dark Mode ──────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg: #0F172A;
+  --card: #1E293B;
+  --border: #334155;
+  --border-strong: #475569;
+  --text: #F1F5F9;
+  --text-2: #CBD5E1;
+  --text-3: #94A3B8;
+  --primary: #3B82F6;
+  --primary-hover: #2563EB;
+  --primary-soft: #1E3A5F;
+  --warning: #FCD34D;
+  --warning-bg: #1C1708;
+  --warning-border: #854D0E;
+  --success: #4ADE80;
+  --success-bg: #052E16;
+  --danger: #F87171;
+  --danger-bg: #2D0A0A;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F172A;
+    --card: #1E293B;
+    --border: #334155;
+    --border-strong: #475569;
+    --text: #F1F5F9;
+    --text-2: #CBD5E1;
+    --text-3: #94A3B8;
+    --primary: #3B82F6;
+    --primary-hover: #2563EB;
+    --primary-soft: #1E3A5F;
+    --warning: #FCD34D;
+    --warning-bg: #1C1708;
+    --warning-border: #854D0E;
+    --success: #4ADE80;
+    --success-bg: #052E16;
+    --danger: #F87171;
+    --danger-bg: #2D0A0A;
+    color-scheme: dark;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -49,6 +94,40 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: 'cv11', 'ss01';
+}
+
+/* Transisi warna halus saat ganti tema */
+body,
+.app-container {
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+/* ── Scrollbar mengikuti tema ────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 #app {
@@ -122,7 +201,7 @@ code, kbd, .mono {
   border-color: var(--border-strong);
 }
 .btn-secondary:hover:not(:disabled) {
-  background: #F8FAFC;
+  background: var(--bg);
   border-color: var(--text-3);
 }
 .btn-ghost {
@@ -131,7 +210,7 @@ code, kbd, .mono {
   border-color: transparent;
 }
 .btn-ghost:hover:not(:disabled) {
-  background: rgba(15, 23, 42, 0.05);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 .btn-danger {
   background: var(--danger);
@@ -168,7 +247,7 @@ code, kbd, .mono {
 }
 .input::placeholder { color: var(--text-3); }
 .input:disabled {
-  background: #F1F5F9;
+  background: var(--bg);
   color: var(--text-3);
 }
 
@@ -189,7 +268,7 @@ code, kbd, .mono {
 .badge-blue  { background: var(--primary-soft); color: var(--primary); }
 .badge-amber { background: var(--warning-bg); color: var(--warning); }
 .badge-red   { background: var(--danger-bg); color: var(--danger); }
-.badge-slate { background: #F1F5F9; color: var(--text-3); }
+.badge-slate { background: var(--bg); color: var(--text-3); }
 
 /* ── Panel / Card ───────────────────────────────────── */
 .panel {

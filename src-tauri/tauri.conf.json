@@ -12,11 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "ArsipDok — Pencatatan Dokumentasi Foto & Video",
+        "title": "ArsipDok — Pengarsip Dokumentasi Foto & Video",
         "width": 1200,
         "height": 850,
-        "minWidth": 1000,
-        "minHeight": 700,
+        "minWidth": 620,
+        "minHeight": 500,
         "resizable": true,
         "fullscreen": false,
         "center": true,

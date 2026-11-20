@@ -14,6 +14,7 @@ import type {
 } from './types';
 
 export type AppState =
+  | 'welcome'
   | 'kosong'
   | 'memindai'
   | 'siap'
@@ -23,7 +24,7 @@ export type AppState =
   | 'ada_masalah';
 
 function createStore() {
-  let appState = $state<AppState>('kosong');
+  let appState = $state<AppState>('welcome');
   let sourcePaths = $state<string[]>([]);
   let scanReport = $state<ScanReport | null>(null);
   let scannedFiles = $state<ScannedFile[]>([]);
@@ -34,6 +35,8 @@ function createStore() {
   let destProgresses = $state<DestProgress[]>([]);
   let transferReport = $state<TransferReport | null>(null);
   let logEntries = $state<LogEntry[]>([]);
+  let theme = $state<'system' | 'light' | 'dark'>('system');
+  let appVersion = $state('0.1.0');
   let showSettings = $state(false);
   let showConfirm = $state(false);
   let showDateTooltip = $state<string | null>(null);
@@ -93,6 +96,8 @@ function createStore() {
     get showDateTooltip() { return showDateTooltip; },
     get globalError() { return globalError; },
     get settings() { return settings; },
+    get theme() { return theme; },
+    get appVersion() { return appVersion; },
 
     // Derived
     get totalSourceSize() { return totalSourceSize; },
@@ -117,6 +122,8 @@ function createStore() {
     set showDateTooltip(v: string | null) { showDateTooltip = v; },
     set globalError(v: string | null) { globalError = v; },
     set settings(v: Settings) { settings = v; },
+    set theme(v: 'system' | 'light' | 'dark') { theme = v; },
+    set appVersion(v: string) { appVersion = v; },
 
     resetAll() {
       appState = 'kosong';

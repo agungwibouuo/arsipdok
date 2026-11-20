@@ -2,7 +2,7 @@
   import { store, formatBytes } from '../store.svelte';
   import { api } from '../api';
   import { save } from '@tauri-apps/plugin-dialog';
-  import type { PreviewRow } from '../types';
+  import type { PreviewRow, LogEntry } from '../types';
 
   interface Props {
     onNewSession?: () => void;
@@ -16,7 +16,6 @@
   const plan = $derived(store.plan);
   const mode = $derived(store.settings.transfer_mode);
 
-  // Baris gagal / partial, dikelompokkan untuk tabel kegagalan
   const failedRows = $derived(
     store.previewRows.filter((r) => r.status === 'error' || r.status === 'partial')
   );
@@ -27,8 +26,29 @@
   const errorCount = $derived(report?.items_error ?? failedRows.length);
   const skippedCount = $derived(report?.items_skipped ?? store.previewRows.filter((r) => r.status === 'skipped').length);
   const bytesTransferred = $derived(report?.total_bytes_transferred ?? plan?.total_bytes ?? 0);
+  const totalSelected = $derived(plan?.total_files ?? store.previewRows.length);
 
   const activeDestinations = $derived(store.settings.destinations.filter((d) => d.enabled));
+
+  const folderNames = $derived(
+    plan?.folder_names && plan.folder_names.length > 0
+      ? plan.folder_names
+      : Array.from(
+          new Set(
+            store.previewRows.map((r) => {
+              const d = r.date_override ?? r.date;
+              const dest = activeDestinations[0];
+              const activity = (dest?.activity || '').trim() || 'Nama Kegiatan';
+              const suffix = (dest?.suffix ?? '').trim();
+              const parts = d.split('-');
+              const mmDd = parts.length === 3 ? `${parts[1]}-${parts[2]}` : d;
+              return `${mmDd}_${activity}${suffix ? `_${suffix}` : ''}`;
+            })
+          )
+        )
+  );
+
+  const logEntries = $derived(store.logEntries);
 
   function durationLabel(): string {
     const ms = report?.duration_ms ?? store.scanReport?.duration_ms ?? 0;
@@ -40,13 +60,71 @@
     return `${min} menit ${sec} detik`;
   }
 
+  function formatDisplayDate(dateStr: string): string {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+      const d = parseInt(parts[2], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      return `${d} ${months[m] ?? parts[1]}`;
+    }
+    return dateStr;
+  }
+
   function destFolderFor(row: PreviewRow): string {
     const d = row.date_override ?? row.date;
     const dest = activeDestinations[0];
     const activity = (dest?.activity || '').trim() || 'Nama Kegiatan';
     const suffix = (dest?.suffix ?? '').trim();
-    return `${d}_${activity}${suffix ? `_${suffix}` : ''}`;
+    const parts = d.split('-');
+    const mmDd = parts.length === 3 ? `${parts[1]}-${parts[2]}` : d;
+    return `${mmDd}_${activity}${suffix ? `_${suffix}` : ''}`;
   }
+
+  const VIDEO_EXT = new Set(['.mp4', '.mov', '.avi', '.mkv', '.3gp', '.m4v', '.wmv', '.mts', '.hevc']);
+
+  function isVideoFile(path: string): boolean {
+    const dot = path.lastIndexOf('.');
+    const ext = dot >= 0 ? path.slice(dot).toLowerCase() : '';
+    return VIDEO_EXT.has(ext);
+  }
+
+  // Map source_path → preview row (untuk tanggal) agar tabel log & preview konsisten
+  const rowBySource = $derived.by(() => {
+    const map = new Map<string, PreviewRow>();
+    for (const r of store.previewRows) map.set(r.source, r);
+    return map;
+  });
+
+  function infoForEntry(entry: LogEntry): { name: string; isVideo: boolean; date: string; folder: string } {
+    const name = entry.source_path.split(/[\\/]/).pop() ?? entry.source_path;
+    const row = rowBySource.get(entry.source_path);
+    const dateStr = row ? (row.date_override ?? row.date) : '';
+    const date = dateStr ? formatDisplayDate(dateStr) : '—';
+    return {
+      name,
+      isVideo: isVideoFile(entry.source_path),
+      date,
+      folder: destFolderNameFromPaths(entry.dest_path, entry.dest_root),
+    };
+  }
+
+  // Ambil nama folder kegiatan pertama dari dest_path relatif terhadap dest_root,
+  // mis. "D:\Arsip\03-15_Kegiatan\DSC_0001.jpg" + root "D:\Arsip" → "03-15_Kegiatan"
+  function destFolderNameFromPaths(destPath: string, destRoot: string): string {
+    if (!destPath) return '—';
+    const normRoot = (destRoot ?? '').replace(/[\\/]+$/, '');
+    let rel = destPath;
+    if (normRoot && destPath.toLowerCase().startsWith(normRoot.toLowerCase())) {
+      rel = destPath.slice(normRoot.length);
+    }
+    const segs = rel.split(/[\\/]/).filter(Boolean);
+    return segs.length > 0 ? segs[0] : (destPath.split(/[\\/]/).filter(Boolean).pop() ?? destPath);
+  }
+
+  const avgPerFile = $derived(
+    successCount > 0 ? formatBytes(Math.round(bytesTransferred / successCount)) : '—'
+  );
 
   async function openTarget() {
     const dest = activeDestinations[0];
@@ -92,294 +170,739 @@
   }
 </script>
 
-<section class="done panel" aria-label="Hasil transfer">
+<div class="done-view" aria-label="Hasil transfer">
   {#if !isPartial}
-    <div class="success-hero">
-      <div class="check-circle" aria-hidden="true">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
-          <path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </div>
-      <h2 class="hero-title">Transfer Selesai!</h2>
-      <p class="hero-sub">
-        {successCount} file berhasil {mode === 'move' ? 'dipindahkan' : 'disalin'} ({formatBytes(bytesTransferred)})
-      </p>
-    </div>
-  {:else}
-    <div class="partial-banner" role="alert">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M12 4 2.8 19.5h18.4L12 4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-        <path d="M12 10v4M12 17v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
-      </svg>
-      <div>
-        <h2>Transfer Selesai dengan Catatan</h2>
-        <p>
-          {successCount} berhasil
-          {#if errorCount > 0}· {errorCount} gagal{/if}
-          {#if skippedCount > 0}· {skippedCount} dilewati{/if}
+    <!-- Banner Sukses -->
+    <section class="banner banner-success">
+      <div class="accent"></div>
+      <div class="banner-icon" aria-hidden="true">✅</div>
+      <div class="banner-text">
+        <h2 class="banner-title">Pemindahan Selesai</h2>
+        <p class="banner-sub">
+          {successCount} file berhasil {mode === 'move' ? 'dipindahkan' : 'disalin'} ke {activeDestinations.length || 1} folder • {formatBytes(bytesTransferred)} • selesai dalam {durationLabel()}
         </p>
       </div>
-    </div>
+      <div class="banner-actions">
+        <button class="banner-btn outline-green" type="button" disabled={busy !== null} onclick={exportCsv}>
+          {busy === 'export' ? 'Mengekspor…' : '⬇ Ekspor CSV'}
+        </button>
+        <button class="banner-btn solid-green" type="button" disabled={busy !== null} onclick={openTarget}>
+          📂 Buka
+        </button>
+      </div>
+    </section>
+  {:else}
+    <!-- Banner Peringatan -->
+    <section class="banner banner-warn" role="alert">
+      <div class="accent"></div>
+      <div class="banner-icon" aria-hidden="true">⚠️</div>
+      <div class="banner-text">
+        <h2 class="banner-title">Pemindahan Selesai dengan {failedRows.length} Masalah</h2>
+        <p class="banner-sub">
+          {successCount} file berhasil di semua tujuan • {errorCount} file gagal di salah satu tujuan • file sumber TIDAK dihapus
+        </p>
+      </div>
+      <div class="banner-actions">
+        <button class="banner-btn outline-red" type="button" disabled={busy !== null} onclick={exportCsv}>
+          {busy === 'export' ? 'Mengekspor…' : '⬇ Ekspor CSV'}
+        </button>
+        <button class="banner-btn solid-red" type="button" onclick={newSession}>
+          ↻ Ulangi
+        </button>
+      </div>
+    </section>
   {/if}
 
-  <div class="summary-grid">
-    <div class="summary-card">
-      <span class="summary-value">{successCount}</span>
-      <span class="summary-label">File berhasil</span>
+  <!-- Stat Cards -->
+  <div class="stat-grid">
+    <div class="stat-card">
+      <span class="stat-lbl">{mode === 'move' ? 'File Dipindahkan' : 'File Disalin'}</span>
+      <span class="stat-val" class:green={!isPartial} class:red={isPartial}>{successCount}</span>
+      <span class="stat-sub">dari {totalSelected} terpilih</span>
     </div>
-    <div class="summary-card">
-      <span class="summary-value">{formatBytes(bytesTransferred)}</span>
-      <span class="summary-label">Total ukuran</span>
+    <div class="stat-card">
+      <span class="stat-lbl">Total Ukuran</span>
+      <span class="stat-val">{formatBytes(bytesTransferred)}</span>
+      <span class="stat-sub">rata-rata {avgPerFile}/file</span>
     </div>
-    <div class="summary-card">
-      <span class="summary-value">{durationLabel()}</span>
-      <span class="summary-label">Durasi</span>
+    <div class="stat-card">
+      <span class="stat-lbl">Dilewati / Gagal</span>
+      <span class="stat-val" class:green={errorCount + skippedCount === 0} class:amber={errorCount + skippedCount > 0}>
+        {errorCount + skippedCount}
+      </span>
+      <span class="stat-sub">{errorCount + skippedCount === 0 ? 'tidak ada masalah' : `${errorCount} gagal • ${skippedCount} dilewati`}</span>
     </div>
-    {#if isPartial}
-      <div class="summary-card danger">
-        <span class="summary-value">{errorCount}</span>
-        <span class="summary-label">File gagal</span>
-      </div>
-    {/if}
   </div>
 
-  {#if isPartial}
-    <div class="failure-section">
-      <h3>Rincian Kegagalan</h3>
-      <div class="fail-table-wrap">
-        <table class="fail-table">
-          <thead>
-            <tr>
-              <th scope="col">Nama File</th>
-              <th scope="col">Folder Tujuan</th>
-              <th scope="col">Status</th>
-              <th scope="col">Keterangan</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#if failedRows.length === 0}
-              <tr>
-                <td colspan="4" class="empty-cell">Tidak ada detail per file. Lihat pesan kesalahan di atas.</td>
-              </tr>
-            {:else}
-              {#each failedRows as row (row.source)}
-                <tr>
-                  <td class="truncate" title={row.source}>{row.name}</td>
-                  <td class="mono-sm">{destFolderFor(row)}</td>
-                  <td>
-                    <span class="badge {row.status === 'partial' ? 'badge-amber' : 'badge-red'}">
-                      {row.status === 'partial' ? 'Sebagian' : 'Gagal'}
-                    </span>
-                  </td>
-                  <td class="error-text">{row.error ?? 'Transfer tidak selesai di semua tujuan'}</td>
-                </tr>
-              {/each}
-            {/if}
-          </tbody>
-        </table>
+  {#if !isPartial}
+    <!-- Panel Log -->
+    <section class="panel-log">
+      <div class="log-top">
+        <h2 class="panel-title">Log Pemindahan</h2>
+        <span class="log-sub">— {logEntries.length || successCount} baris, semua berhasil</span>
+      </div>
+
+      <div class="table-container">
+        <div class="table-header">
+          <span class="th-nama">Nama File</span>
+          <span class="th-tipe">Tipe</span>
+          <span class="th-ukuran">Ukuran</span>
+          <span class="th-tanggal">Tanggal</span>
+          <span class="th-tujuan">Folder Tujuan</span>
+          <span class="th-status">Hasil</span>
+        </div>
+        <div class="table-body">
+          {#if logEntries.length === 0}
+            {#each store.previewRows as r (r.source)}
+              <div class="table-row">
+                <span class="cell-nama truncate" title={r.name}>{r.name}</span>
+                <span class="cell-tipe">{r.kind === 'video' ? '🎬' : '📷'}</span>
+                <span class="cell-ukuran">{formatBytes(r.size_bytes)}</span>
+                <span class="cell-tanggal">{formatDisplayDate(r.date_override ?? r.date)}</span>
+                <span class="cell-tujuan truncate" title={destFolderFor(r)}>{destFolderFor(r)}</span>
+                <span class="cell-status st-done">✓ {mode === 'move' ? 'Dipindah' : 'Tersalin'}</span>
+              </div>
+            {/each}
+          {:else}
+            {#each logEntries as entry, i (i)}
+              {@const rowInfo = infoForEntry(entry)}
+              <div class="table-row">
+                <span class="cell-nama truncate" title={entry.source_path}>{rowInfo.name}</span>
+                <span class="cell-tipe">{rowInfo.isVideo ? '🎬' : '📷'}</span>
+                <span class="cell-ukuran">{formatBytes(entry.size_bytes)}</span>
+                <span class="cell-tanggal">{rowInfo.date}</span>
+                <span class="cell-tujuan truncate" title={rowInfo.folder}>{rowInfo.folder}</span>
+                <span class="cell-status st-done">✓ {entry.status === 'copied' ? 'Tersalin' : entry.status === 'moved' ? 'Dipindah' : entry.status}</span>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </div>
+    </section>
+  {:else}
+    <!-- Panel Masalah -->
+    <section class="panel-masalah">
+      <div class="log-top">
+        <h2 class="panel-title">File Gagal ({failedRows.length})</h2>
+        <span class="log-sub">— periksa penyebab lalu klik Ulangi untuk file ini saja</span>
+      </div>
+
+      <div class="table-container">
+        <div class="table-header error-header">
+          <span class="th-nama">Nama File</span>
+          <span class="th-ukuran">Ukuran</span>
+          <span class="th-tanggal">Tanggal</span>
+          <span class="th-tujuan">Folder Tujuan</span>
+          <span class="th-sebab">Penyebab</span>
+          <span class="th-aksi">Aksi</span>
+        </div>
+        <div class="table-body">
+          {#if failedRows.length === 0}
+            <div class="empty-cell">Tidak ada detail per file. Lihat pesan kesalahan di atas.</div>
+          {:else}
+            {#each failedRows as row (row.source)}
+              <div class="fail-row">
+                <span class="fail-icon">✖</span>
+                <div class="fail-nama">
+                  <span class="cell-nama truncate" title={row.name}>{row.name}</span>
+                  <span class="fail-meta">dari {destFolderFor(row)}</span>
+                </div>
+                <span class="cell-ukuran">{formatBytes(row.size_bytes)}</span>
+                <span class="cell-tanggal">{formatDisplayDate(row.date_override ?? row.date)}</span>
+                <span class="cell-tujuan truncate" title={destFolderFor(row)}>{destFolderFor(row)}</span>
+                <div class="fail-sebab">
+                  <span class="fail-reason">{row.error ?? 'Transfer tidak selesai di semua tujuan'}</span>
+                  <span class="fail-hint">Status: {row.status === 'partial' ? 'Parsial' : 'Gagal'} • Sumber tidak dihapus</span>
+                </div>
+                <button class="btn-retry-row" type="button" onclick={newSession}>↻ Ulangi</button>
+              </div>
+            {/each}
+          {/if}
+        </div>
       </div>
 
       {#if mode === 'move'}
-        <p class="move-note">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8" />
-            <path d="M12 11v5.5M12 7.6v.1" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
-          </svg>
-          <span>File sumber tidak dihapus karena gagal di sebagian tujuan.</span>
-        </p>
+        <div class="info-box">
+          <span class="info-line">⚠ Mode Pindah (Move) multi-tujuan: file sumber HANYA dihapus setelah berhasil di SEMUA tujuan.</span>
+          <span class="info-line">Saran: buat ulang koneksi NAS/izin folder lalu ulangi. Tujuan yang sudah berhasil tidak akan diduplikasi.</span>
+        </div>
       {/if}
-    </div>
-  {/if}
 
-  <div class="actions">
-    <button class="btn btn-secondary" type="button" disabled={busy !== null} onclick={openTarget}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.58L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-      </svg>
-      <span>Buka Folder Tujuan</span>
-    </button>
-    <button class="btn btn-secondary" type="button" disabled={busy !== null} onclick={exportCsv}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M12 3v11m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-      <span>{busy === 'export' ? 'Mengekspor...' : 'Ekspor Laporan CSV'}</span>
-    </button>
-    <button class="btn btn-primary" type="button" onclick={newSession}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-      </svg>
-      <span>Mulai Sesi Baru</span>
-    </button>
-  </div>
-</section>
+      <div class="dest-divider"></div>
+      <div class="dest-status-section">
+        <span class="dest-status-title">Status per tujuan</span>
+        <div class="dest-status-list">
+          {#each store.destProgresses as d (d.dest_id)}
+            {@const pct = d.total > 0 ? Math.round((d.done / d.total) * 100) : 0}
+            {@const failed = d.total - d.done}
+            <div class="dest-status-row">
+              <div class="dest-info">
+                <span class="dest-root">{d.dest_root}</span>
+                <span class="dest-folder">{d.dest_folder || 'Semua folder kegiatan'}</span>
+              </div>
+              <span class="dest-count">{d.done}/{d.total} file</span>
+              {#if failed === 0}
+                <span class="dest-ok">✓ Semua berhasil</span>
+              {:else}
+                <span class="dest-fail">⚠ {failed} gagal</span>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      </div>
+    </section>
+  {/if}
+</div>
 
 <style>
-  .done {
+  .done-view {
     display: flex;
     flex-direction: column;
+    gap: 16px;
+    height: 100%;
+    box-sizing: border-box;
+    overflow-y: auto;
+  }
+
+  /* Banner */
+  .banner {
+    position: relative;
+    display: flex;
+    align-items: center;
     gap: 20px;
-    padding: 24px;
+    height: 80px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0 16px 0 24px;
+    box-sizing: border-box;
+    flex: 0 0 auto;
   }
 
-  .success-hero {
+  .accent {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    border-radius: 8px 0 0 8px;
+  }
+
+  .banner-success .accent {
+    background: #16A34A;
+  }
+
+  .banner-warn .accent {
+    background: #DC2626;
+  }
+
+  .banner-icon {
+    font-size: 26px;
+    line-height: 1;
+    flex: 0 0 auto;
+  }
+
+  .banner-text {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: 8px;
-    padding: 12px 0 4px;
+    gap: 2px;
   }
 
-  .check-circle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 68px;
-    height: 68px;
-    border-radius: 50%;
-    background: var(--success-bg);
-    color: var(--success);
-    margin-bottom: 6px;
-  }
-
-  .hero-title {
-    font-size: 20px;
+  .banner-title {
+    margin: 0;
+    font-size: 16px;
     font-weight: 700;
-    color: var(--text);
+    line-height: 1.2;
   }
 
-  .hero-sub {
-    font-size: 13.5px;
+  .banner-success .banner-title {
+    color: #166534;
+  }
+
+  .banner-warn .banner-title {
+    color: #991B1B;
+  }
+
+  .banner-sub {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  .banner-success .banner-sub {
+    color: #15803D;
+  }
+
+  .banner-warn .banner-sub {
+    color: #B91C1C;
+  }
+
+  .banner-actions {
+    display: flex;
+    gap: 10px;
+    flex: 0 0 auto;
+  }
+
+  .banner-btn {
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+
+  .banner-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .outline-green {
+    background: var(--card);
+    border: 1px solid #86EFAC;
+    color: #166534;
+  }
+
+  .outline-green:hover:not(:disabled) {
+    background: #F0FDF4;
+  }
+
+  .solid-green {
+    background: #16A34A;
+    border: none;
+    color: #ffffff;
+    font-weight: 600;
+  }
+
+  .solid-green:hover:not(:disabled) {
+    background: #15803D;
+  }
+
+  .outline-red {
+    background: var(--card);
+    border: 1px solid #FCA5A5;
+    color: #991B1B;
+  }
+
+  .outline-red:hover:not(:disabled) {
+    background: #FFF1F2;
+  }
+
+  .solid-red {
+    background: #DC2626;
+    border: none;
+    color: #ffffff;
+    font-weight: 600;
+  }
+
+  .solid-red:hover:not(:disabled) {
+    background: #B91C1C;
+  }
+
+  /* Stat cards */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    flex: 0 0 auto;
+  }
+
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    height: 76px;
+    padding: 12px 16px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .stat-lbl {
+    font-size: 11px;
     color: var(--text-3);
   }
 
-  .partial-banner {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 14px 16px;
-    border: 1px solid var(--warning-border);
-    border-radius: var(--radius);
-    background: var(--warning-bg);
-    color: var(--warning);
-  }
-
-  .partial-banner h2 {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--warning);
-  }
-
-  .partial-banner p {
-    font-size: 13px;
-    margin-top: 2px;
-    color: var(--text-2);
-  }
-
-  .summary-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    gap: 10px;
-  }
-
-  .summary-card {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg);
-  }
-
-  .summary-card.danger {
-    background: var(--danger-bg);
-    border-color: #fecaca;
-  }
-
-  .summary-card.danger .summary-value {
-    color: var(--danger);
-  }
-
-  .summary-value {
-    font-size: 18px;
+  .stat-val {
+    font-size: 22px;
     font-weight: 700;
     color: var(--text);
+    line-height: 1.1;
     font-variant-numeric: tabular-nums;
   }
 
-  .summary-label {
-    font-size: 12px;
+  .stat-val.green {
+    color: #16A34A;
+  }
+
+  .stat-val.red {
+    color: #DC2626;
+  }
+
+  .stat-val.amber {
+    color: #B45309;
+  }
+
+  .stat-sub {
+    font-size: 10px;
     color: var(--text-3);
   }
 
-  .failure-section {
+  /* Panels */
+  .panel-log,
+  .panel-masalah {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    flex: 1;
+    min-height: 0;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     gap: 8px;
+    overflow: hidden;
   }
 
-  .failure-section h3 {
-    font-size: 13.5px;
+  .log-top {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex: 0 0 auto;
   }
 
-  .fail-table-wrap {
-    max-height: 220px;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+  .panel-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
   }
 
-  .fail-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12.5px;
-  }
-
-  .fail-table th {
-    position: sticky;
-    top: 0;
-    background: #f8fafc;
-    text-align: left;
-    padding: 8px 12px;
+  .log-sub {
     font-size: 11px;
-    text-transform: uppercase;
     color: var(--text-3);
-    border-bottom: 1px solid var(--border);
   }
 
-  .fail-table td {
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-    vertical-align: middle;
+  .table-container {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    container-type: inline-size;
   }
 
-  .error-text {
-    color: var(--danger);
+  .table-header {
+    display: grid;
+    grid-template-columns: minmax(0, 2.5fr) 42px 70px 88px minmax(0, 2.5fr) 104px;
+    align-items: center;
+    height: 30px;
+    background: var(--bg);
+    border-radius: 4px;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-2);
+    flex: 0 0 auto;
+  }
+
+  .table-header.error-header {
+    grid-template-columns: 24px minmax(0, 2.2fr) 64px 80px minmax(0, 2fr) minmax(0, 2.2fr) 84px;
+    background: #FEF2F2;
+    color: #991B1B;
+  }
+
+  .table-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .table-row {
+    display: grid;
+    grid-template-columns: minmax(0, 2.5fr) 42px 70px 88px minmax(0, 2.5fr) 104px;
+    align-items: center;
+    height: 30px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--bg);
     font-size: 12px;
+    flex: 0 0 auto;
+  }
+
+  /* Panel sempit: sembunyikan kolom minor */
+  @container (max-width: 660px) {
+    .table-header,
+    .table-row {
+      grid-template-columns: minmax(0, 1fr) 64px 96px minmax(0, 1fr);
+    }
+
+    .th-tipe,
+    .cell-tipe,
+    .th-ukuran,
+    .cell-ukuran {
+      display: none;
+    }
+  }
+
+  @container (max-width: 420px) {
+    .table-header,
+    .table-row {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      padding: 0 8px;
+    }
+
+    .th-tanggal,
+    .cell-tanggal {
+      display: none;
+    }
+  }
+
+  .table-row:hover {
+    background: var(--bg);
+  }
+
+  .cell-nama {
+    color: var(--text);
+  }
+
+  .cell-tipe {
+    font-size: 13px;
+  }
+
+  .cell-ukuran {
+    color: var(--text-2);
+    font-size: 11px;
+  }
+
+  .cell-tanggal {
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .cell-tujuan {
+    color: #0066CC;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .cell-status {
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .cell-status.st-done {
+    color: #16A34A;
+  }
+
+  /* Fail rows */
+  .fail-row {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 2.2fr) 60px 90px minmax(0, 2fr) minmax(0, 2.4fr) 90px;
+    align-items: center;
+    min-height: 38px;
+    padding: 4px 12px;
+    border-bottom: 1px solid #FEE2E2;
+    font-size: 12px;
+    flex: 0 0 auto;
+  }
+
+  /* Error panel sempit queries */
+  @container (max-width: 660px) {
+    .fail-row {
+      grid-template-columns: 24px minmax(0, 1fr) 56px 72px minmax(0, 1fr);
+    }
+
+    .fail-row .cell-ukuran,
+    .fail-row .cell-tanggal {
+      display: none;
+    }
+  }
+
+  @container (max-width: 420px) {
+    .fail-row {
+      grid-template-columns: 20px minmax(0, 1fr) minmax(0, 1fr);
+      padding: 4px 8px;
+    }
+
+    .fail-row .cell-tanggal {
+      display: none;
+    }
+
+    .btn-retry-row {
+      width: 32px;
+      padding: 4px;
+    }
+  }
+
+  .fail-icon {
+    color: #DC2626;
+    font-weight: 700;
+    font-size: 12px;
+  }
+
+  .fail-nama {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .fail-meta {
+    font-size: 10px;
+    color: var(--text-3);
+  }
+
+  .fail-sebab {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .fail-reason {
+    font-size: 11px;
+    color: #B91C1C;
+  }
+
+  .fail-hint {
+    font-size: 9px;
+    color: var(--text-3);
+  }
+
+  .btn-retry-row {
+    height: 26px;
+    padding: 0 10px;
+    background: #FFF1F2;
+    border: 1px solid #FECDD3;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #DC2626;
+    cursor: pointer;
+    font-family: inherit;
+    justify-self: start;
+  }
+
+  .btn-retry-row:hover {
+    background: #FEE2E2;
   }
 
   .empty-cell {
     text-align: center;
     color: var(--text-3);
-    padding: 18px;
+    padding: 24px;
+    font-size: 12px;
   }
 
-  .move-note {
+  /* Info box */
+  .info-box {
+    background: #FFF7E6;
+    border-radius: 6px;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 0 auto;
+  }
+
+  .info-line {
+    font-size: 11px;
+    color: #B45309;
+  }
+
+  /* Dest status */
+  .dest-divider {
+    height: 1px;
+    background: var(--border);
+    flex: 0 0 auto;
+  }
+
+  .dest-status-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 0 0 auto;
+  }
+
+  .dest-status-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .dest-status-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .dest-status-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--warning);
-    margin-top: 4px;
+    gap: 16px;
+    min-width: 0;
   }
 
-  .actions {
+  .dest-info {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 310px;
     display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    flex-wrap: wrap;
-    padding-top: 8px;
-    border-top: 1px solid var(--border);
+    flex-direction: column;
+  }
+
+  .dest-root {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dest-folder {
+    font-size: 9px;
+    color: var(--text-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dest-count {
+    font-size: 10px;
+    color: var(--text-2);
+  }
+
+  .dest-ok {
+    font-size: 10px;
+    font-weight: 500;
+    color: #16A34A;
+  }
+
+  .dest-fail {
+    font-size: 10px;
+    font-weight: 500;
+    color: #B45309;
+  }
+
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 </style>

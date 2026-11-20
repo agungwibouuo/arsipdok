@@ -342,7 +342,7 @@
 
   .tab:hover:not(.active) {
     color: var(--text-2);
-    background: #f8fafc;
+    background: var(--bg);
   }
 
   .tab.active {
@@ -390,7 +390,7 @@
     align-self: flex-start;
     padding: 3px;
     gap: 2px;
-    background: #f1f5f9;
+    background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 999px;
   }
@@ -503,7 +503,7 @@
     font-size: 11px;
     font-weight: 600;
     color: var(--text-3);
-    background: #f1f5f9;
+    background: var(--bg);
     border-radius: 999px;
     padding: 0 7px;
     line-height: 18px;

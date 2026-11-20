@@ -5,8 +5,6 @@
   import TitleBar from './lib/components/TitleBar.svelte';
   import Footer from './lib/components/Footer.svelte';
   import Toast from './lib/components/Toast.svelte';
-  import Modal from './lib/components/Modal.svelte';
-  import EmptyState from './lib/components/EmptyState.svelte';
   import SourceQueue from './lib/components/SourceQueue.svelte';
   import DestPanel from './lib/components/DestPanel.svelte';
   import PreviewTable from './lib/components/PreviewTable.svelte';
@@ -14,6 +12,7 @@
   import TransferProgress from './lib/components/TransferProgress.svelte';
   import DoneState from './lib/components/DoneState.svelte';
   import SettingsModal from './lib/components/SettingsModal.svelte';
+  import WelcomeState from './lib/components/WelcomeState.svelte';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import type { BackendProgress, BackendItemEvent, PreviewRow } from './lib/types';
 
@@ -32,12 +31,26 @@
       showErrorToast(`Gagal memuat pengaturan: ${String(err)}`);
     }
 
+    // Sinkronkan versi aplikasi dari backend
+    try {
+      store.appVersion = await api.getVersion();
+    } catch {
+      /* biarkan fallback versi default */
+    }
+
+    // Pastikan ada minimal satu tujuan
+    if (store.settings.destinations.length === 0) {
+      store.addDestination();
+    }
+
+    // Pilih semua baris setelah pemindaian selesai (default select-all)
+    // (diatur di onRescanSources)
+
     // Drag & drop global + event progres transfer
     try {
       const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
       await getCurrentWebviewWindow().onDragDropEvent((event) => {
         if (event.payload.type === 'drop' && event.payload.paths?.length) {
-          // Saat transfer berjalan, abaikan drop baru
           if (store.appState === 'memindahkan') return;
           onDropPaths(event.payload.paths);
         }
@@ -49,14 +62,12 @@
     try {
       const { listen } = await import('@tauri-apps/api/event');
 
-      // Event progres agregat per tujuan
       await listen<BackendProgress>('transfer://progress', (evt) => {
         const p = evt.payload;
         const existing = new Map(store.destProgresses.map((d) => [d.dest_root, d]));
         store.destProgresses = p.per_dest.map((entry) => {
           const prev = existing.get(entry.dest_root);
           const finished = entry.total > 0 && entry.done >= entry.total;
-          // Rasio item selesai → estimasi byte selesai (backend belum mengirim byte per tujuan)
           const ratio = entry.total > 0 ? entry.done / entry.total : 0;
           const bytesTotal = prev?.bytes_total ?? 0;
           return {
@@ -77,7 +88,6 @@
           };
         });
 
-        // Tandai baris pratinjau yang sedang diproses
         if (p.current_source) {
           store.previewRows = store.previewRows.map((r) =>
             r.source === p.current_source ? { ...r, status: 'copying' } : r,
@@ -85,14 +95,11 @@
         }
       });
 
-      // Event per-item (optional untuk UI detail)
-      await listen<BackendItemEvent>('transfer://item', (evt) => {
-        const item = evt.payload;
-        // Update status baris tabel dari nama item
-        // Mungkin tidak perlu untuk MVP, tapi siap untuk nanti
+      await listen<BackendItemEvent>('transfer://item', () => {
+        // placeholder untuk detail per-item
       });
-    } catch (err) {
-      // Tauri events tidak tersedia atau terjadi error — OK di dev mode
+    } catch {
+      // Tauri events tidak tersedia — OK di dev mode
     }
   });
 
@@ -132,29 +139,6 @@
     if (added) await onRescanSources();
   }
 
-  async function onBrowseSource() {
-    try {
-      const selected = await openDialog({
-        directory: true,
-        multiple: true,
-        title: 'Pilih folder sumber dokumentasi',
-      });
-      if (!selected) return;
-      const paths = Array.isArray(selected) ? selected : [selected];
-      let added = false;
-      for (const p of paths) {
-        if (p) {
-          store.addSourcePath(p);
-          added = true;
-        }
-      }
-      // Dari state kosong: langsung pindai sumber pertama kali
-      if (added && store.appState === 'kosong') await onRescanSources();
-    } catch (err) {
-      showErrorToast(`Gagal membuka dialog: ${String(err)}`);
-    }
-  }
-
   async function onRescanSources() {
     if (store.sourcePaths.length === 0) {
       showErrorToast('Belum ada folder sumber untuk dipindai');
@@ -167,11 +151,9 @@
       store.scanReport = report;
       store.scannedFiles = report.files || [];
 
-      // Ekstrak metadata untuk semua file
       const dateMap = await api.extractMetadata(report.files || []);
       store.dateMap = dateMap;
 
-      // Bangun preview rows dari files + metadata
       const rows: PreviewRow[] = (report.files || []).map((f) => {
         const meta = dateMap[f.path] || {
           date: new Date().toISOString().slice(0, 10),
@@ -197,6 +179,9 @@
       });
       store.previewRows = rows;
 
+      // Default: semua baris terseleksi
+      store.selectedRows = new Set(rows.map((r) => r.source));
+
       store.appState = 'siap';
       showSuccessToast(`Pemindaian selesai: ${report.total_files} file ditemukan`);
     } catch (err) {
@@ -210,15 +195,17 @@
       showErrorToast('Pilih minimal satu file untuk ditransfer');
       return;
     }
-
     const activeDestinations = store.settings.destinations.filter((d) => d.enabled);
     if (activeDestinations.length === 0) {
       showErrorToast('Aktifkan minimal satu tujuan pengarsipan');
       return;
     }
-
-    store.appState = 'konfirmasi';
-    store.showConfirm = true;
+    if (store.settings.confirm_before_start) {
+      store.appState = 'konfirmasi';
+      store.showConfirm = true;
+    } else {
+      await onStartTransfer();
+    }
   }
 
   async function onStartTransfer() {
@@ -230,7 +217,6 @@
       const selectedRowsSet = store.selectedRows;
       const selectedFiles = store.scannedFiles.filter((f) => selectedRowsSet.has(f.path));
 
-      // Gabungkan metadata asli dengan date override manual dari user
       const dates: typeof store.dateMap = { ...store.dateMap };
       for (const row of store.previewRows) {
         if (row.date_override) {
@@ -246,7 +232,6 @@
         }
       }
 
-      // Simpan settings terbaru (mode transfer, tujuan) sebelum mulai
       try {
         await api.saveSettings(store.settings);
       } catch {
@@ -256,10 +241,9 @@
       const plan = await api.buildPlan(selectedFiles, dates, activeDestinations);
       store.plan = plan;
 
-      // Inisialisasi progres per tujuan dari plan
-      const perRoot = new Map<string, { done: number; total: number; bytesTotal: number; hasError: boolean }>();
+      const perRoot = new Map<string, { done: number; total: number; bytesTotal: number }>();
       for (const it of plan.items) {
-        const e = perRoot.get(it.dest_root) ?? { done: 0, total: 0, bytesTotal: 0, hasError: false };
+        const e = perRoot.get(it.dest_root) ?? { done: 0, total: 0, bytesTotal: 0 };
         e.total += 1;
         e.bytesTotal += it.size_bytes;
         perRoot.set(it.dest_root, e);
@@ -275,7 +259,6 @@
         status: 'waiting' as const,
       }));
 
-      // Mulai transfer dengan source roots untuk cleanup folder kosong
       const sourceRoots = Array.from(new Set(store.sourcePaths));
       const report = await api.startTransfer(plan, store.settings.transfer_mode, sourceRoots);
 
@@ -307,6 +290,7 @@
   function onNewSession() {
     store.resetAll();
     store.appState = 'kosong';
+    if (store.settings.destinations.length === 0) store.addDestination();
   }
 
   function onShowSettings() {
@@ -317,78 +301,57 @@
     store.showSettings = false;
   }
 
-  const footerStatus = $derived.by(() => {
-    switch (store.appState) {
-      case 'memindai':
-        return 'Memindai...';
-      case 'memindahkan':
-        return `Transfer ${store.transferProgress}%`;
-      case 'ada_masalah':
-        return 'Ada masalah';
-      case 'selesai':
-        return 'Selesai';
-      case 'konfirmasi':
-        return 'Siap dikonfirmasi';
-      default:
-        return 'Siap';
-    }
-  });
-
-  const footerBusy = $derived(store.appState === 'memindai' || store.appState === 'memindahkan');
+  const showWelcome = $derived(store.appState === 'welcome');
+  const showUpperPanels = $derived(!showWelcome && store.appState !== 'memindahkan' && store.appState !== 'selesai' && store.appState !== 'ada_masalah');
+  const showLowerTable = $derived(showUpperPanels);
+  const showTransfer = $derived(store.appState === 'memindahkan');
+  const showDone = $derived(store.appState === 'selesai' || store.appState === 'ada_masalah');
 </script>
 
 <div class="app-container">
   <TitleBar onSettings={onShowSettings} />
 
   <main class="main-content">
-    {#if store.appState === 'kosong'}
-      <EmptyState onBrowse={onBrowseSource} onDropFiles={onDropPaths} />
-    {:else}
-      <div class="layout-grid">
-        <div class="col-left">
-          <SourceQueue
-            onAddPath={onAddSource}
-            onRescan={onRescanSources}
-            rescanDisabled={store.appState !== 'siap'}
-          />
-          <DestPanel />
-        </div>
+    {#if showWelcome}
+      <WelcomeState />
+    {:else if showUpperPanels}
+      <!-- Upper row: Panel Sumber (580) + Panel Tujuan (560) -->
+      <div class="upper-row" class:tall={store.appState !== 'kosong'}>
+        <SourceQueue
+          onAddPath={onAddSource}
+          onRescan={onRescanSources}
+          rescanDisabled={store.appState !== 'siap' && store.appState !== 'kosong'}
+          tall={store.appState !== 'kosong'}
+        />
+        <DestPanel tall={store.appState !== 'kosong'} />
+      </div>
+    {/if}
 
-        <div class="col-right">
-          {#if store.appState === 'memindai'}
-            <div class="loading-state">
-              <div class="spinner" aria-hidden="true"></div>
-              <p>Memindai folder sumber...</p>
-            </div>
-          {:else if store.appState === 'siap' || store.appState === 'konfirmasi'}
-            <PreviewTable />
-          {:else if store.appState === 'memindahkan'}
-            <TransferProgress onCancel={onCancelTransfer} />
-          {:else if store.appState === 'selesai' || store.appState === 'ada_masalah'}
-            <DoneState onNewSession={onNewSession} />
-          {/if}
-        </div>
+    {#if showLowerTable}
+      <div class="lower-row">
+        {#if store.appState === 'memindai'}
+          <div class="scan-overlay">
+            <div class="spinner" aria-hidden="true"></div>
+            <p>Memindai folder sumber…</p>
+          </div>
+        {:else}
+          <PreviewTable />
+        {/if}
+      </div>
+    {:else if showTransfer}
+      <div class="full-card transfer-card">
+        <TransferProgress onCancel={onCancelTransfer} />
+      </div>
+    {:else if showDone}
+      <div class="full-card">
+        <DoneState onNewSession={onNewSession} />
       </div>
     {/if}
   </main>
 
-  <!-- Tombol aksi utama: ditampilkan di bagian bawah saat siap -->
-  {#if store.appState === 'siap'}
-    <div class="action-bar">
-      <button class="btn btn-primary btn-lg" onclick={onConfirmTransfer}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path
-            d="M14 15v2.5H8v-2.5M12 3v9m0-9l3 3m-3-3l-3 3"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-        <span>Transfer Sekarang</span>
-      </button>
-    </div>
-  {/if}
+  <div class="footer-wrap" class:hidden={showWelcome}>
+    <Footer onStart={onConfirmTransfer} busy={store.appState === 'memindai' || store.appState === 'memindahkan'} onReset={onNewSession} />
+  </div>
 
   <!-- Modal Konfirmasi -->
   <ConfirmModal
@@ -409,8 +372,6 @@
       <Toast message={toastMessage} type={toastType} onClose={() => (showToast = false)} />
     </div>
   {/if}
-
-  <Footer leftText={footerStatus} rightText="v0.1.0" busy={footerBusy} />
 </div>
 
 <style>
@@ -418,8 +379,10 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
+    width: 100%;
     background: var(--bg);
-    color: var(--text-1);
+    color: var(--text);
+    overflow: hidden;
   }
 
   .main-content {
@@ -428,48 +391,67 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    gap: 16px;
+    padding: 16px 20px 0;
+    box-sizing: border-box;
   }
 
-  .layout-grid {
+  .upper-row {
     display: grid;
-    grid-template-columns: 400px 1fr;
-    gap: 0;
-    height: 100%;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px;
+    flex: 0 0 auto;
+    align-items: start;
     overflow: hidden;
+    min-width: 0;
   }
 
-  .col-left {
+  .upper-row > :global(*) {
+    min-width: 0;
+  }
+
+  .upper-row.tall {
+    min-height: 320px;
+  }
+
+  .lower-row {
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 0;
+    position: relative;
+    min-width: 0;
+  }
+
+  .full-card {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    border-right: 1px solid var(--border);
     background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-sizing: border-box;
   }
 
-  .col-right {
-    display: flex;
-    flex-direction: column;
+  /* TransferProgress/DoneState render their own panel chrome */
+  .full-card.transfer-card {
+    background: transparent;
+    border: none;
+    border-radius: 0;
     overflow: hidden;
   }
 
-  .action-bar {
-    padding: 12px 20px;
-    border-top: 1px solid var(--border);
-    background: var(--bg);
-    display: flex;
-    gap: 8px;
+  .footer-wrap {
+    flex: 0 0 auto;
+    padding: 16px 20px;
+    box-sizing: border-box;
   }
 
-  .btn-lg {
-    padding: 10px 24px;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  .footer-wrap.hidden {
+    display: none;
   }
 
-  .loading-state {
+  .scan-overlay {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -477,6 +459,9 @@
     justify-content: center;
     gap: 16px;
     color: var(--text-2);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
   }
 
   .spinner {
@@ -496,25 +481,42 @@
 
   .toast-container {
     position: fixed;
-    bottom: 60px;
+    bottom: 90px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 1000;
   }
 
-  @media (max-width: 1200px) {
-    .layout-grid {
-      grid-template-columns: 320px 1fr;
+  /* ── Responsif: jendela sempit / snap 2-side ───────── */
+  @media (max-width: 1080px) {
+    .main-content {
+      padding: 12px 14px 0;
+      gap: 12px;
+    }
+
+    .upper-row {
+      gap: 12px;
+    }
+
+    .footer-wrap {
+      padding: 12px 14px;
     }
   }
 
-  @media (max-width: 900px) {
-    .layout-grid {
-      grid-template-columns: 1fr;
+  /* Panels stack vertically; keep component-level rules authoritative. */
+  @media (max-width: 860px) {
+    .upper-row,
+    .upper-row.tall {
+      grid-template-columns: minmax(0, 1fr);
+      min-height: 0;
     }
 
-    .col-left {
-      display: none;
+    .main-content {
+      overflow-y: auto;
+    }
+
+    .lower-row {
+      min-height: 300px;
     }
   }
 </style>

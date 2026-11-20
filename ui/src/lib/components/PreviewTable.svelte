@@ -1,21 +1,17 @@
 <script lang="ts">
-  import { store, formatBytes, sourceLabel, metaSourceBadgeColor } from '../store.svelte';
+  import { store, formatBytes, sourceLabel } from '../store.svelte';
   import type { PreviewRow, FileKind } from '../types';
 
   interface Props {
-    onEditDate?: (row: PreviewRow, applyToFolder: boolean) => void;
+    onEditDate?: (row: PreviewRow, applyScope: boolean) => void;
   }
 
   let { onEditDate }: Props = $props();
 
-  type KindFilter = 'all' | FileKind;
-  type ReviewFilter = 'all' | 'review';
-
   let search = $state('');
-  let kindFilter = $state<KindFilter>('all');
-  let reviewFilter = $state<ReviewFilter>('all');
+  let kindFilter = $state<'all' | FileKind>('all');
 
-  // Baris yang sedang diedit tanggalnya (source path) + state popover
+  // Editor popover state
   let editingSource = $state<string | null>(null);
   let editDate = $state('');
   let applyScope = $state<'file' | 'folder'>('file');
@@ -25,7 +21,6 @@
   const filtered = $derived(
     rows.filter((r) => {
       if (kindFilter !== 'all' && r.kind !== kindFilter) return false;
-      if (reviewFilter === 'review' && !(r.needs_review && !r.date_override)) return false;
       const q = search.trim().toLowerCase();
       if (q && !r.name.toLowerCase().includes(q)) return false;
       return true;
@@ -34,7 +29,6 @@
 
   const allSelected = $derived(filtered.length > 0 && filtered.every((r) => store.selectedRows.has(r.source)));
   const someSelected = $derived(filtered.some((r) => store.selectedRows.has(r.source)));
-  const selectedCount = $derived(store.selectedRows.size);
 
   const editingRow = $derived(rows.find((r) => r.source === editingSource) ?? null);
 
@@ -56,12 +50,27 @@
     return r.date_override ?? r.date;
   }
 
+  function formatDisplayDate(dateStr: string): string {
+    // Input format: YYYY-MM-DD
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+      const d = parseInt(parts[2], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      return `${d} ${months[m] ?? parts[1]}`;
+    }
+    return dateStr;
+  }
+
   function folderName(r: PreviewRow): string {
     const d = dateOf(r);
     const dest = store.settings.destinations.find((x) => x.enabled);
     const activity = (dest?.activity || '').trim() || 'Nama Kegiatan';
     const suffix = (dest?.suffix ?? '').trim();
-    return `${d}_${activity}${suffix ? `_${suffix}` : ''}`;
+    // In FigCraft: "03-15_Pelatihan Petani" (MM-DD_Activity)
+    const parts = d.split('-');
+    const mmDd = parts.length === 3 ? `${parts[1]}-${parts[2]}` : d;
+    return `${mmDd}_${activity}${suffix ? `_${suffix}` : ''}`;
   }
 
   function openEditor(r: PreviewRow) {
@@ -93,491 +102,361 @@
     const idx = Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/'));
     return idx >= 0 ? p.slice(0, idx) : p;
   }
-
-  function badgeClass(r: PreviewRow): string {
-    if (r.date_override) return 'badge-blue';
-    if (r.needs_review) return 'badge-amber';
-    return 'badge-slate';
-  }
-
-  function badgeLabel(r: PreviewRow): string {
-    return r.date_override ? 'Manual' : sourceLabel(r.metadata_source);
-  }
 </script>
 
-<section class="preview panel" aria-label="Pratinjau file">
-  <div class="filter-bar">
-    <div class="search-wrap">
-      <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8" />
-        <path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-      </svg>
-      <input class="input search-input" type="search" placeholder="Cari nama file..." bind:value={search} />
-    </div>
-
-    <div class="segmented" role="group" aria-label="Filter tipe file">
-      <button class="seg" class:active={kindFilter === 'all'} type="button" onclick={() => (kindFilter = 'all')}>Semua</button>
-      <button class="seg" class:active={kindFilter === 'photo'} type="button" onclick={() => (kindFilter = 'photo')}>Foto</button>
-      <button class="seg" class:active={kindFilter === 'video'} type="button" onclick={() => (kindFilter = 'video')}>Video</button>
-    </div>
-
-    <div class="segmented" role="group" aria-label="Filter review">
-      <button class="seg" class:active={reviewFilter === 'all'} type="button" onclick={() => (reviewFilter = 'all')}>Semua</button>
-      <button class="seg" class:active={reviewFilter === 'review'} type="button" onclick={() => (reviewFilter = 'review')}>
-        Perlu Review
-        {#if store.needsReviewCount > 0}
-          <span class="mini-count">{store.needsReviewCount}</span>
-        {/if}
-      </button>
-    </div>
-
-    <div class="select-all-wrap">
-      <label class="select-all">
-        <input
-          type="checkbox"
-          checked={allSelected}
-          indeterminate={someSelected && !allSelected}
-          onchange={toggleAll}
-        />
-        <span>Pilih Semua</span>
-      </label>
-      <span class="badge badge-blue">{selectedCount} terpilih</span>
-    </div>
+<section class="preview-panel" aria-label="Preview File dan Pengelompokan">
+  <div class="panel-head">
+    <h2 class="step-title">3&nbsp; Preview File &amp; Pengelompokan</h2>
   </div>
 
-  <div class="table-wrap">
-    <table class="preview-table">
-      <thead>
-        <tr>
-          <th class="col-check" scope="col"><span class="sr-only">Pilih</span></th>
-          <th scope="col">Nama File</th>
-          <th class="col-size" scope="col">Ukuran</th>
-          <th class="col-date" scope="col">Tanggal Terdeteksi</th>
-          <th scope="col">Folder Tujuan</th>
-          <th class="col-action" scope="col"><span class="sr-only">Aksi</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        {#if filtered.length === 0}
-          <tr>
-            <td colspan="6" class="empty-cell">Tidak ada file yang cocok dengan filter.</td>
-          </tr>
-        {:else}
-          {#each filtered as r (r.source)}
-            {@const selected = store.selectedRows.has(r.source)}
-            <tr class:selected class:editing={editingSource === r.source}>
-              <td class="col-check">
-                <input
-                  type="checkbox"
-                  checked={selected}
-                  aria-label={`Pilih ${r.name}`}
-                  onchange={() => toggleRow(r.source)}
-                />
-              </td>
-              <td class="cell-name">
-                <span class="kind-icon" class:video={r.kind === 'video'} aria-hidden="true">
-                  {#if r.kind === 'video'}
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                      <rect x="3" y="6" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.8" />
-                      <path d="m15 11 5-3v8l-5-3" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-                    </svg>
-                  {:else}
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                      <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8" />
-                      <circle cx="8.5" cy="9.5" r="1.6" stroke="currentColor" stroke-width="1.6" />
-                      <path d="m4 17 5-4.5 4 3.5 3-2.5 4 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
-                  {/if}
-                </span>
-                <span class="name truncate" title={r.source}>{r.name}</span>
-              </td>
-              <td class="col-size mono-sm">{formatBytes(r.size_bytes)}</td>
-              <td class="col-date">
-                <span class="date-text">{dateOf(r)}</span>
-                <span class="badge {badgeClass(r)}">{badgeLabel(r)}</span>
-                {#if r.needs_review && !r.date_override}
-                  <span class="review-flag" title="Tanggal perlu diperiksa">⚠</span>
-                {/if}
-              </td>
-              <td class="cell-folder">
-                <span class="mono-sm folder-text truncate" title={folderName(r)}>{folderName(r)}</span>
-              </td>
-              <td class="col-action">
-                <div class="action-wrap">
-                  <button
-                    class="icon-btn"
-                    type="button"
-                    title="Edit tanggal"
-                    aria-label={`Edit tanggal ${r.name}`}
-                    aria-expanded={editingSource === r.source}
-                    onclick={() => (editingSource === r.source ? closeEditor() : openEditor(r))}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <path
-                        d="m4 20 4.2-1 10-10a2 2 0 0 0-2.8-2.8l-10 10L4 20Z"
-                        stroke="currentColor"
-                        stroke-width="1.7"
-                        stroke-linejoin="round"
-                      />
-                      <path d="m13.5 7.5 3 3" stroke="currentColor" stroke-width="1.7" />
-                    </svg>
-                  </button>
+  {#if rows.length === 0}
+    <div class="empty-placeholder">
+      <span class="empty-icon" aria-hidden="true">📂</span>
+      <span class="empty-title">Belum ada file untuk ditampilkan</span>
+      <span class="empty-desc">Tambahkan sumber dokumentasi — metadata dipindai otomatis.</span>
+    </div>
+  {:else}
+    <div class="table-container">
+      <div class="table-header">
+        <label class="th-check">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            indeterminate={someSelected && !allSelected}
+            onchange={toggleAll}
+          />
+        </label>
+        <span class="th-name">Nama File</span>
+        <span class="th-tipe">Tipe</span>
+        <span class="th-ukuran">Ukuran</span>
+        <span class="th-tanggal">Tanggal</span>
+        <span class="th-sumber">Sumber</span>
+        <span class="th-tujuan">Folder Tujuan</span>
+      </div>
 
-                  {#if editingSource === r.source}
-                    <div class="popover" role="dialog" aria-label="Edit tanggal file">
-                      <div class="popover-title">Edit Tanggal</div>
-                      <input class="input" type="date" bind:value={editDate} />
+      <div class="table-body">
+        {#each filtered as r (r.source)}
+          {@const selected = store.selectedRows.has(r.source)}
+          <div class="table-row" class:selected>
+            <label class="cell-check">
+              <input
+                type="checkbox"
+                checked={selected}
+                aria-label={`Pilih ${r.name}`}
+                onchange={() => toggleRow(r.source)}
+              />
+            </label>
+            <span class="cell-name truncate" title={r.name}>{r.name}</span>
+            <span class="cell-tipe">{r.kind === 'video' ? '🎬' : '📷'}</span>
+            <span class="cell-ukuran">{formatBytes(r.size_bytes)}</span>
+            <button class="cell-tanggal" type="button" onclick={() => openEditor(r)} title="Klik untuk ubah tanggal">
+              {formatDisplayDate(dateOf(r))}
+            </button>
+            <span class="cell-sumber badge-{r.metadata_source}">{sourceLabel(r.metadata_source)}</span>
+            <span class="cell-tujuan truncate" title={folderName(r)}>{folderName(r)}</span>
 
-                      <div class="scope-options">
-                        <label class="radio-row">
-                          <input type="radio" name="scope" value="file" checked={applyScope === 'file'} onchange={() => (applyScope = 'file')} />
-                          <span>File ini saja</span>
-                        </label>
-                        <label class="radio-row">
-                          <input type="radio" name="scope" value="folder" checked={applyScope === 'folder'} onchange={() => (applyScope = 'folder')} />
-                          <span>Semua file di folder ini</span>
-                        </label>
-                      </div>
-
-                      <div class="popover-actions">
-                        <button class="btn btn-ghost btn-sm" type="button" onclick={closeEditor}>Batal</button>
-                        <button class="btn btn-primary btn-sm" type="button" disabled={!editDate} onclick={applyEdit}>Terapkan</button>
-                      </div>
-                    </div>
-                  {/if}
+            {#if editingSource === r.source}
+              <div class="popover">
+                <div class="pop-title">Edit Tanggal</div>
+                <input class="pop-date-input" type="date" bind:value={editDate} />
+                <div class="pop-scope">
+                  <label>
+                    <input type="radio" name="scope" value="file" checked={applyScope === 'file'} onchange={() => (applyScope = 'file')} />
+                    <span>File ini saja</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="scope" value="folder" checked={applyScope === 'folder'} onchange={() => (applyScope = 'folder')} />
+                    <span>Semua file di folder ini</span>
+                  </label>
                 </div>
-              </td>
-            </tr>
-          {/each}
-        {/if}
-      </tbody>
-    </table>
-  </div>
-
-  <footer class="table-footer">
-    <span>{filtered.length} dari {rows.length} file</span>
-    <span class="footer-dot">·</span>
-    <span>{formatBytes(filtered.reduce((s, r) => s + r.size_bytes, 0))}</span>
-  </footer>
+                <div class="pop-actions">
+                  <button class="pop-btn" type="button" onclick={closeEditor}>Batal</button>
+                  <button class="pop-btn pop-btn-primary" type="button" disabled={!editDate} onclick={applyEdit}>Terapkan</button>
+                </div>
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
 </section>
 
 <style>
-  .preview {
+  .preview-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
     display: flex;
     flex-direction: column;
+    gap: 8px;
+    flex: 1;
     min-height: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    container-type: inline-size;
+  }
+
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .step-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+  }
+
+  /* Empty state inside panel */
+  .empty-placeholder {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--text-3);
+  }
+
+  .empty-icon {
+    font-size: 46px;
+    color: var(--border-strong);
+    line-height: 1;
+    margin-bottom: 2px;
+  }
+
+  .empty-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-3);
+  }
+
+  .empty-desc {
+    font-size: 12px;
+    color: var(--text-3);
+  }
+
+  /* Table Grid */
+  .table-container {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
   }
 
-  .filter-bar {
-    display: flex;
+  .table-header,
+  .table-row {
+    display: grid;
+    grid-template-columns: 32px minmax(140px, 3.5fr) 48px 90px 124px 72px minmax(140px, 4fr);
     align-items: center;
-    gap: 10px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    flex-wrap: wrap;
+    gap: 8px;
+    height: 30px;
+    padding: 0 10px;
+    box-sizing: border-box;
   }
 
-  .search-wrap {
-    position: relative;
-    flex: 1 1 200px;
-    min-width: 160px;
+  /* Panel sempit (2-side app / jendela kecil): sembunyikan kolom minor */
+  @container (max-width: 720px) {
+    .table-header,
+    .table-row {
+      grid-template-columns: 32px minmax(0, 1fr) 64px 96px minmax(0, 1fr);
+    }
+
+    .th-tipe,
+    .th-sumber,
+    .cell-tipe,
+    .cell-sumber {
+      display: none;
+    }
   }
 
-  .search-icon {
-    position: absolute;
-    left: 11px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--text-3);
-    pointer-events: none;
+  @container (max-width: 460px) {
+    .table-header,
+    .table-row {
+      grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr);
+      gap: 6px;
+      padding: 0 8px;
+    }
+
+    .th-ukuran,
+    .cell-ukuran,
+    .th-tanggal,
+    .cell-tanggal {
+      display: none;
+    }
   }
 
-  .search-input {
-    padding-left: 34px;
-    height: 34px;
-  }
-
-  .segmented {
-    display: inline-flex;
-    padding: 2px;
-    gap: 2px;
-    background: #f1f5f9;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-  }
-
-  .seg {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 28px;
-    padding: 0 11px;
-    border-radius: 5px;
-    font-size: 12.5px;
-    font-weight: 500;
-    color: var(--text-3);
-    transition: background 0.12s ease, color 0.12s ease;
-  }
-
-  .seg:hover:not(.active) {
-    color: var(--text-2);
-  }
-
-  .seg.active {
-    background: var(--card);
-    color: var(--text);
-    box-shadow: var(--shadow-sm);
-  }
-
-  .mini-count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 999px;
-    background: var(--warning-bg);
-    color: var(--warning);
-    font-size: 10.5px;
-    font-weight: 600;
-  }
-
-  .select-all-wrap {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-left: auto;
-  }
-
-  .select-all {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--text-2);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .table-wrap {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
-  }
-
-  .preview-table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    font-size: 13px;
-  }
-
-  .preview-table thead th {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    background: #f8fafc;
-    text-align: left;
+  .table-header {
+    background: var(--bg);
+    border-radius: 4px;
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    color: var(--text-3);
-    padding: 9px 12px;
-    border-bottom: 1px solid var(--border);
-    white-space: nowrap;
-  }
-
-  .preview-table tbody td {
-    padding: 9px 12px;
-    border-bottom: 1px solid var(--border);
-    vertical-align: middle;
-  }
-
-  .preview-table tbody tr:hover {
-    background: #f8fafc;
-  }
-
-  .preview-table tbody tr.selected {
-    background: var(--primary-soft);
-  }
-
-  .preview-table tbody tr.editing {
-    background: var(--primary-soft);
-  }
-
-  .col-check {
-    width: 40px;
-    text-align: center;
-  }
-
-  .col-size {
-    width: 90px;
-    white-space: nowrap;
     color: var(--text-2);
+    flex: 0 0 auto;
   }
 
-  .col-date {
-    width: 190px;
-    white-space: nowrap;
+  .table-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
   }
 
-  .col-action {
-    width: 60px;
-    text-align: right;
+  .table-row {
+    border-bottom: 1px solid var(--bg);
+    background: var(--card);
+    font-size: 12px;
+    color: var(--text);
+    position: relative;
+  }
+
+  .table-row:hover {
+    background: var(--bg);
+  }
+
+  .table-row.selected {
+    background: var(--primary-soft);
+  }
+
+  .th-check,
+  .cell-check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .th-check input,
+  .cell-check input {
+    cursor: pointer;
   }
 
   .cell-name {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    max-width: 320px;
-    min-width: 0;
-  }
-
-  .kind-icon {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    border-radius: 6px;
-    background: var(--primary-soft);
-    color: var(--primary);
-  }
-
-  .kind-icon.video {
-    background: #fef3c7;
-    color: #b45309;
-  }
-
-  .name {
+    font-weight: 400;
     color: var(--text);
-    font-weight: 500;
   }
 
-  .date-text {
-    font-family: var(--font-mono);
-    font-size: 12.5px;
-    margin-right: 6px;
+  .cell-tipe {
     color: var(--text-2);
+    font-size: 13px;
   }
 
-  .review-flag {
-    margin-left: 4px;
-    color: var(--warning);
+  .cell-ukuran {
+    color: var(--text-2);
+    font-family: inherit;
+  }
+
+  .cell-tanggal {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-family: inherit;
     font-size: 12px;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+    text-decoration: underline dotted var(--border-strong);
   }
 
-  .cell-folder {
-    max-width: 260px;
+  .cell-tanggal:hover {
+    color: #0066CC;
+    text-decoration-color: #0066CC;
   }
 
-  .folder-text {
-    display: block;
+  .cell-sumber {
+    font-size: 11px;
+    font-weight: 500;
+    color: #16A34A;
+  }
+
+  .cell-sumber.badge-file_modified,
+  .cell-sumber.badge-file_created {
     color: var(--text-3);
   }
 
-  .empty-cell {
-    text-align: center;
-    color: var(--text-3);
-    padding: 32px 12px;
-  }
-
-  .action-wrap {
-    position: relative;
-    display: inline-flex;
-    justify-content: flex-end;
-  }
-
-  .icon-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-sm);
-    color: var(--text-3);
-    transition: background 0.12s ease, color 0.12s ease;
-  }
-
-  .icon-btn:hover {
-    background: var(--primary-soft);
-    color: var(--primary);
+  .cell-tujuan {
+    color: #0066CC;
   }
 
   .popover {
     position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: 20;
-    width: 250px;
-    padding: 12px;
+    top: 32px;
+    left: 200px;
+    background: var(--card);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-radius: 6px;
+    padding: 10px 12px;
+    z-index: 100;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-md);
-    text-align: left;
+    gap: 8px;
+    width: 230px;
   }
 
-  .popover-title {
-    font-size: 12px;
+  .pop-title {
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-2);
   }
 
-  .scope-options {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+  .pop-date-input {
+    height: 26px;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 0 6px;
+    font-size: 11px;
+    font-family: inherit;
   }
 
-  .radio-row {
+  .pop-scope {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-2);
+  }
+
+  .pop-scope label {
     display: flex;
     align-items: center;
-    gap: 7px;
-    font-size: 12.5px;
-    color: var(--text-2);
+    gap: 6px;
     cursor: pointer;
   }
 
-  .popover-actions {
+  .pop-actions {
     display: flex;
     justify-content: flex-end;
     gap: 6px;
-    margin-top: 2px;
   }
 
-  .table-footer {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    border-top: 1px solid var(--border);
-    font-size: 12px;
-    color: var(--text-3);
-    background: var(--card);
+  .pop-btn {
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--bg);
+    font-size: 10px;
+    cursor: pointer;
+    font-family: inherit;
   }
 
-  .footer-dot {
-    opacity: 0.6;
+  .pop-btn-primary {
+    background: #0F62FE;
+    color: #ffffff;
+    border-color: #0F62FE;
   }
 
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
+  .truncate {
     overflow: hidden;
-    clip: rect(0, 0, 0, 0);
+    text-overflow: ellipsis;
     white-space: nowrap;
-    border: 0;
+    min-width: 0;
   }
 </style>

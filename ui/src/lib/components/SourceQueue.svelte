@@ -6,9 +6,10 @@
     onAddPath?: (path: string) => void;
     onRescan?: () => void;
     rescanDisabled?: boolean;
+    tall?: boolean;
   }
 
-  let { onAddPath, onRescan, rescanDisabled = false }: Props = $props();
+  let { onAddPath, onRescan, rescanDisabled = false, tall = false }: Props = $props();
 
   const hasScanned = $derived(store.scanReport !== null);
   const count = $derived(store.sourcePaths.length);
@@ -40,228 +41,300 @@
       store.globalError = `Gagal membuka dialog folder: ${String(err)}`;
     }
   }
+
+  function fileCount(): number {
+    return store.scannedFiles.length;
+  }
 </script>
 
-<section class="source-queue panel" aria-label="Antrean sumber dokumentasi">
-  <header class="queue-header">
-    <div class="title-wrap">
-      <h2>Sumber Dokumentasi</h2>
-      <span class="badge badge-blue" aria-label={`${count} sumber`}>{count} sumber</span>
-    </div>
+<section class="source-panel" class:tall aria-label="Sumber dokumentasi">
+  <div class="panel-head">
+    <h2 class="step-title">1&nbsp; Sumber Dokumentasi</h2>
     {#if hasScanned}
-      <button
-        class="btn btn-secondary btn-sm"
-        type="button"
-        onclick={() => onRescan?.()}
-        disabled={rescanDisabled || count === 0}
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path
-            d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"
-            stroke="currentColor"
-            stroke-width="1.9"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-        <span>Pindai Ulang</span>
+      <button class="btn-rescan" type="button" onclick={() => onRescan?.()} disabled={rescanDisabled || count === 0}>
+        Pindai Ulang
       </button>
     {/if}
-  </header>
+  </div>
 
   {#if count === 0}
-    <p class="empty-hint">Belum ada folder sumber. Tambahkan folder SD card atau folder lokal untuk mulai memindai.</p>
+    <div class="dropzone-large">
+      <span class="drop-icon" aria-hidden="true">⬇</span>
+      <span class="drop-line">Tarik folder / SD Card / drive ke sini</span>
+      <button class="btn-browse" type="button" onclick={addSource}>Pilih Folder…</button>
+      <span class="drop-hint">Bisa juga tarik beberapa sumber sekaligus</span>
+    </div>
+    <p class="format-hint">Didukung: JPG, PNG, HEIC, TIFF, MP4, MOV, AVI, MKV, 3GP</p>
   {:else}
-    <ul class="source-list">
+    <div class="queue-list">
       {#each store.sourcePaths as path (path)}
         {@const sd = isSdCard(path)}
-        <li class="source-item">
-          <span class="folder-icon" class:sd aria-hidden="true">
-            {#if sd}
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <rect x="5" y="3" width="14" height="18" rx="2" stroke="currentColor" stroke-width="1.8" />
-                <path d="M8 7h8M8 11h8M8 15h8M8 18h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-              </svg>
-            {:else}
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.58L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            {/if}
+        <div class="queue-row" class:done={hasScanned}>
+          <span class="q-path truncate" title={path}>
+            {sd ? '🖧' : '📁'} {basename(path)}
           </span>
-
-          <div class="meta">
-            <span class="path truncate mono-sm" title={path}>{path}</span>
-            {#if hasScanned}
-              <span class="summary">
-                <span class="file-count">{store.scannedFiles.length} file</span>
-                <span class="dot">·</span>
-                <span>{formatMb(store.totalSourceSize)} total</span>
-              </span>
-            {:else}
-              <span class="summary waiting">Menunggu pemindaian</span>
-            {/if}
-          </div>
-
+          {#if hasScanned}
+            <span class="q-status">✓ {fileCount()} file siap</span>
+          {:else}
+            <span class="q-status pending">○ menunggu pindai</span>
+          {/if}
           <button
-            class="remove-btn"
+            class="q-remove"
             type="button"
             title={`Hapus ${basename(path)}`}
             aria-label={`Hapus sumber ${basename(path)}`}
             onclick={() => store.removeSourcePath(path)}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
-            </svg>
-          </button>
-        </li>
+          >✕</button>
+        </div>
       {/each}
-    </ul>
-  {/if}
+    </div>
 
-  <button class="btn btn-secondary add-btn" type="button" onclick={addSource}>
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-    </svg>
-    <span>Tambah Sumber Lain</span>
-  </button>
+    <button class="dropzone-mini" type="button" onclick={addSource}>
+      <span class="mini-icon" aria-hidden="true">⬇</span>
+      <span class="mini-text">
+        <span class="mini-line">Tambah sumber lain — tarik folder ke sini</span>
+        <span class="mini-link">atau Pilih Folder…</span>
+      </span>
+    </button>
+  {/if}
 </section>
 
-<script lang="ts" module>
-  function formatMb(bytes: number): string {
-    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  }
-</script>
-
 <style>
-  .source-queue {
+  .source-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 16px;
+    gap: 7px;
+    min-height: 240px;
+    height: 240px;
+    box-sizing: border-box;
+    overflow: hidden;
   }
 
-  .queue-header {
+  .source-panel.tall {
+    height: 320px;
+  }
+
+  .source-panel.tall .dropzone-large {
+    min-height: 232px;
+  }
+
+  .panel-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
   }
 
-  .title-wrap {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .title-wrap h2 {
-    font-size: 15px;
-  }
-
-  .empty-hint {
-    font-size: 13px;
-    color: var(--text-3);
-    line-height: 1.5;
-  }
-
-  .source-list {
-    list-style: none;
+  .step-title {
     margin: 0;
-    padding: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+  }
+
+  .btn-rescan {
+    height: 22px;
+    padding: 0 8px;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    font-size: 10px;
+    color: var(--text-2);
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .btn-rescan:hover:not(:disabled) {
+    background: var(--bg);
+  }
+
+  .btn-rescan:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Empty dropzone — large */
+  .dropzone-large {
+    flex: 1;
+    background: var(--bg);
+    border: 1px dashed var(--text-3);
+    border-radius: 8px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 10px;
+    min-height: 0;
   }
 
-  .source-item {
+  .drop-icon {
+    font-size: 28px;
+    color: var(--text-3);
+    line-height: 1;
+  }
+
+  .drop-line {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-2);
+    text-align: center;
+  }
+
+  .btn-browse {
+    height: 30px;
+    padding: 0 14px;
+    background: var(--card);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--primary-hover);
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .btn-browse:hover {
+    background: var(--border);
+  }
+
+  .drop-hint {
+    font-size: 10px;
+    color: var(--text-3);
+  }
+
+  .format-hint {
+    margin: 0;
+    font-size: 10px;
+    color: var(--text-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Compact dropzone + queue */
+  .queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+
+  .queue-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
+    gap: 8px;
+    height: 34px;
+    padding: 0 10px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: 6px;
     background: var(--bg);
-    transition: border-color 0.12s ease;
-  }
-
-  .source-item:hover {
-    border-color: var(--border-strong);
-  }
-
-  .folder-icon {
     flex: 0 0 auto;
+  }
+
+  .queue-row.done {
+    background: #F0FDF4;
+    border-color: #BBDDE6;
+  }
+
+  .q-path {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .queue-row.done .q-path {
+    color: #166534;
+  }
+
+  .q-status {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 500;
+    color: #16A34A;
+    white-space: nowrap;
+  }
+
+  .q-status.pending {
+    color: var(--text-3);
+  }
+
+  .q-remove {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
-    border-radius: var(--radius-sm);
-    background: var(--primary-soft);
-    color: var(--primary);
+    background: transparent;
+    border: none;
+    font-size: 11px;
+    color: var(--text-3);
+    cursor: pointer;
+    border-radius: 3px;
+    padding: 0;
+    font-family: inherit;
   }
 
-  .folder-icon.sd {
-    background: #fef3c7;
-    color: #b45309;
+  .q-remove:hover {
+    color: #DC2626;
+    background: #FEF2F2;
   }
 
-  .meta {
-    flex: 1;
-    min-width: 0;
+  .dropzone-mini {
+    width: 100%;
+    height: 44px;
+    flex: 0 0 auto;
+    background: var(--bg);
+    border: 1px dashed var(--text-3);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+  }
+
+  .dropzone-mini:hover {
+    background: var(--bg);
+  }
+
+  .mini-icon {
+    font-size: 18px;
+    color: var(--text-3);
+  }
+
+  .mini-text {
     display: flex;
     flex-direction: column;
     gap: 1px;
   }
 
-  .path {
-    color: var(--text-2);
-  }
-
-  .summary {
+  .mini-line {
     font-size: 12px;
-    color: var(--text-3);
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  .summary.waiting {
-    color: var(--warning);
-  }
-
-  .file-count {
     font-weight: 500;
     color: var(--text-2);
   }
 
-  .dot {
-    opacity: 0.6;
+  .mini-link {
+    font-size: 11px;
+    color: #0066CC;
   }
 
-  .remove-btn {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-sm);
-    color: var(--text-3);
-    transition: background 0.12s ease, color 0.12s ease;
-  }
-
-  .remove-btn:hover {
-    background: var(--danger-bg);
-    color: var(--danger);
-  }
-
-  .add-btn {
-    align-self: flex-start;
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

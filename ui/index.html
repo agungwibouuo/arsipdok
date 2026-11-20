@@ -3,7 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ArsipDok — Pencatatan Dokumentasi Foto &amp; Video</title>
+    <title>ArsipDok — Pengarsip Dokumentasi Foto &amp; Video</title>
+    <script>
+      // Terapkan tema sebelum paint pertama agar tidak ada kedip (FOUC).
+      // Preferensi: localStorage → sistem Windows.
+      (function () {
+        try {
+          var saved = localStorage.getItem('arsipdok-theme') || 'system';
+          var prefersDark =
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var resolved = saved === 'system' ? (prefersDark ? 'dark' : 'light') : saved;
+          document.documentElement.setAttribute('data-theme', resolved);
+          document.documentElement.setAttribute('data-theme-pref', saved);
+        } catch (e) {
+          /* abaikan */
+        }
+      })();
+    </script>
     <script>
       // Tangkap error awal agar layar putih tidak tanpa penjelasan
       window.__arsipdokErrors = [];
